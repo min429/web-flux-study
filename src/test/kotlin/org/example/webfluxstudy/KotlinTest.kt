@@ -1,11 +1,10 @@
 package org.example.webfluxstudy
 
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.DisplayName
+import org.junit.jupiter.api.Nested
 import org.springframework.stereotype.Component
-import reactor.core.publisher.Flux
 import reactor.core.publisher.Mono
-import reactor.core.scheduler.Schedulers
-import java.time.Duration
 import kotlin.test.Test
 
 @Component
@@ -16,95 +15,50 @@ class KotlinTest {
         log.info("main Thread: ${Thread.currentThread().name}")
     }
 
-    /**
-     * 동기 JDBC 블로킹 호출 시 flatMap 결과 순서 보장 테스트
-     */
-    @Test
-    fun syncJdbc_flatMap_orderPreserved() {
-        Flux.just("A", "B", "C")
-            .flatMap { v ->
-                Mono.fromCallable {
-                    Thread.sleep(200) // 동기 블로킹 JDBC 흉내
-                    "$v!"
-                }
-            }
-            .doOnNext { v ->
-                println("[result] $v on ${Thread.currentThread().name}")
-            }
-            .blockLast()
-        // 출력: 항상 A!, B!, C! 순서
-    }
+    @Nested
+    inner class MonoTest {
 
-    /**
-     * JDBC 블로킹 호출 + subscribeOn(boundedElastic) → 각 작업을 다른 스레드에서 실행
-     * 결과 순서는 뒤섞일 수 있음
-     */
-    @Test
-    fun syncJdbc_withSubscribeOn_orderNotGuaranteed() {
-        Flux.just("A", "B", "C")
-            .flatMap { v ->
-                Mono.fromCallable {
-                    if (v == "A") Thread.sleep(300) else Thread.sleep(100)
-                    "$v!"
-                }.subscribeOn(Schedulers.boundedElastic())
-            }
-            .doOnNext { v ->
-                println("[result] $v on ${Thread.currentThread().name}")
-            }
-            .blockLast()
-        // 출력 예: B!, C!, A!  (실행마다 순서 달라짐)
-    }
+        @Test
+        @DisplayName("just vs fromCallable vs defer")
+        fun test1() {
+            // value initialize
+            var value = "just"
+            println("initial value: $value")
 
-    /**
-     * R2DBC/논블로킹 DB 호출 흉내 (delayElement 사용)
-     * 결과 순서는 응답 속도에 따라 달라짐 → flatMap이라 순서 보장 안 됨
-     */
-    @Test
-    fun reactiveDb_flatMap_orderNotGuaranteed() {
-        Flux.just("A", "B", "C")
-            .flatMap { v ->
-                Mono.just("$v!")
-                    .delayElement(if (v == "A") Duration.ofMillis(300) else Duration.ofMillis(100))
-            }
-            .doOnNext { v ->
-                println("[result] $v on ${Thread.currentThread().name}")
-            }
-            .blockLast()
-        // 출력 예: B!, C!, A! (실행마다 순서 달라짐)
-    }
+            // just
+            val just = Mono.just(value)
 
-    /**
-     * flatMap + delayElement
-     * → 비동기 emit이므로 순서 보장 안 됨
-     */
-    @Test
-    fun flatMap_withDelayElement_orderNotGuaranteed() {
-        Flux.just("A", "B", "C")
-            .flatMap { v ->
-                Mono.just("$v!")
-                    .delayElement(
-                        if (v == "A") Duration.ofMillis(300) else Duration.ofMillis(100)
-                    )
+            // fromCallable
+            val fromCallable = Mono.fromCallable {
+                value
             }
-            .doOnNext { v ->
-                println("[result] $v on ${Thread.currentThread().name}")
-            }
-            .blockLast()
-        // 출력 예: B!, C!, A! (실행마다 순서 달라짐)
-    }
 
-    /**
-     * flatMap + 즉시 emit (Mono.just)
-     * → 동기 emit이라 순서 보장됨
-     */
-    @Test
-    fun flatMap_withImmediatePublisher_orderPreserved() {
-        Flux.just("A", "B", "C")
-            .flatMap { v -> Mono.just("$v!") }
-            .doOnNext { v ->
-                println("[result] $v on ${Thread.currentThread().name}")
+            // defer
+            val defer = Mono.defer {
+                Mono.just(value)
             }
-            .blockLast()
-        // 출력: 항상 A!, B!, C!
+
+            println("================================================")
+            just.subscribe { println("just value: $it") }
+            println("================================================")
+            fromCallable.subscribe { println("fromCallable value1: $it") }
+
+            // value reinitialize
+            value = "fromCallable"
+
+            fromCallable.subscribe { println("fromCallable value2: $it") }
+            println("================================================")
+            defer.subscribe { println("defer value1: $it") }
+
+            // value reinitialize
+            value = "defer"
+
+            defer.subscribe { println("defer value2: $it") }
+
+            // just: 체인 형성 도중에 즉시 값 생성,
+            // fromCallable: subscribe 시 값 생성,
+            // defer: subscribe 시 내부 Publisher 생성 후 바로 subscribe (값 생성)
+            // fromCallable, defer는 반환 형식만 다르고 동일한 기능으로 예상됨
+        }
     }
 }
