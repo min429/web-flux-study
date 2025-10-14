@@ -3,12 +3,10 @@ package org.example.webfluxstudy;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
 import java.time.LocalDateTime;
 
-@Component
 @Slf4j
 public class JavaTest {
 
